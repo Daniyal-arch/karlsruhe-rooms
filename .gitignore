@@ -1,0 +1,9 @@
+*.csv
+*.png
+*.html
+__pycache__/
+*.pyc
+debug_*.py
+test_*.py
+listing_*.html
+login_*.png
