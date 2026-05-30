@@ -7,3 +7,6 @@ debug_*.py
 test_*.py
 listing_*.html
 login_*.png
+.env
+.env.example
+node_modules/

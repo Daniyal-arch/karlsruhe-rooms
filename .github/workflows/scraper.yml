@@ -2,8 +2,8 @@ name: Room Scraper — Hourly
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour at :00
-  workflow_dispatch:        # also allows manual trigger from GitHub UI
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -11,31 +11,23 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        working-directory: backend
         run: |
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
+        working-directory: backend
         env:
           SWKA_EMAIL:    ${{ secrets.SWKA_EMAIL }}
           SWKA_PASSWORD: ${{ secrets.SWKA_PASSWORD }}
-          GOOGLE_CREDS:  ${{ secrets.GOOGLE_CREDS }}
-          SHEET_ID:      ${{ secrets.SHEET_ID }}
+          DATABASE_URL:  ${{ secrets.DATABASE_URL }}
           HEADLESS:      "true"
-        run: python scraper_full.py
-
-      - name: Upload CSV as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rooms-${{ github.run_number }}
-          path: rooms_full.csv
-          retention-days: 7
+        run: python scrapers/swka.py

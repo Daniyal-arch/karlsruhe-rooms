@@ -1,0 +1,42 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches: [master]
+    paths: [backend/**]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: studinest-api
+          source: ./backend
+          region: europe-west1
+          flags: >
+            --allow-unauthenticated
+            --port=8000
+            --memory=512Mi
+            --min-instances=0
+            --max-instances=3
+          env_vars: |
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+            GROQ_MODEL=${{ secrets.GROQ_MODEL }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            OAUTH_REDIRECT_URI=${{ secrets.OAUTH_REDIRECT_URI }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            SWKA_EMAIL=${{ secrets.SWKA_EMAIL }}
+            SWKA_PASSWORD=${{ secrets.SWKA_PASSWORD }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
