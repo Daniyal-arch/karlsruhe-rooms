@@ -10,3 +10,6 @@ login_*.png
 .env
 .env.example
 node_modules/
+frontend/.next/
+frontend/out/
+*.trace
