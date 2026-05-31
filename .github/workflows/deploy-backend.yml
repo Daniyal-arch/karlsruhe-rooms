@@ -21,6 +21,7 @@ jobs:
           service: studinest-api
           source: ./backend
           region: europe-west1
+          project_id: dani-498008
           flags: >
             --allow-unauthenticated
             --port=8000
