@@ -24,17 +24,26 @@ function MessageBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user"
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isUser ? "bg-blue-600" : "bg-gray-800"}`}>
-        {isUser ? <User size={14} className="text-white" /> : <Bot size={14} className="text-white" />}
+      <div
+        className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isUser ? "bg-indigo-600" : "bg-gray-100"}`}
+        style={{ border: "1px solid var(--border)" }}
+      >
+        {isUser ? <User size={13} color="white" /> : <Bot size={13} style={{ color: "var(--text-2)" }} />}
       </div>
       <div className={`max-w-[82%] flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
         <div
-          className={`px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap rounded-2xl ${
-            isUser
-              ? "bg-blue-600 text-white rounded-tr-sm"
-              : "bg-white border text-gray-800 rounded-tl-sm"
-          }`}
-          style={isUser ? {} : { border: "1px solid var(--border)", boxShadow: "var(--shadow-sm)" }}
+          className="px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap rounded-2xl"
+          style={isUser ? {
+            background: "var(--accent)",
+            color: "white",
+            borderTopRightRadius: "4px",
+          } : {
+            background: "white",
+            color: "var(--text-1)",
+            border: "1px solid var(--border)",
+            borderTopLeftRadius: "4px",
+            boxShadow: "var(--shadow-sm)",
+          }}
         >
           {msg.content}
         </div>
@@ -68,11 +77,7 @@ export default function AgentPage() {
     try {
       const history = next.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
       const data = await agentApi.chat(msg, history, creds.email, "")
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        content: data.reply,
-        map_pins: data.map_pins || undefined,
-      }])
+      setMessages(prev => [...prev, { role: "assistant", content: data.reply, map_pins: data.map_pins || undefined }])
     } catch {
       setMessages(prev => [...prev, { role: "assistant", content: "Something went wrong. Please try again." }])
     }
@@ -81,19 +86,26 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col h-[calc(100vh-8rem)]">
+    <div className="max-w-3xl mx-auto flex flex-col h-[calc(100vh-10rem)]">
       {/* Header */}
       <div className="card p-4 mb-4 flex items-center gap-4">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "var(--text-1)" }}>
-          <Sparkles size={18} className="text-white" />
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: "linear-gradient(135deg,#4f46e5,#7c3aed)", boxShadow: "0 4px 12px rgba(79,70,229,0.3)" }}
+        >
+          <Sparkles size={18} color="white" />
         </div>
         <div className="flex-1">
-          <h1 className="font-semibold" style={{ color: "var(--text-1)" }}>AI Room Finder</h1>
-          <p className="text-sm" style={{ color: "var(--text-3)" }}>DeepSeek · Searches live listings · Sends emails · Shows maps</p>
+          <h1 className="font-semibold text-sm" style={{ color: "var(--text-1)" }}>AI Room Finder</h1>
+          <p className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>
+            DeepSeek · Searches live listings · Sends emails · Shows maps
+          </p>
         </div>
-        <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${creds.email ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-400"}`}>
-          <div className={`w-1.5 h-1.5 rounded-full ${creds.email ? "bg-green-500" : "bg-gray-300"}`} />
-          {creds.email ? "Gmail connected" : "No Gmail — set in ⚙"}
+        <div
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full shrink-0 ${creds.email ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400"}`}
+        >
+          <div className={`w-1.5 h-1.5 rounded-full ${creds.email ? "bg-emerald-500" : "bg-gray-300"}`} />
+          <span className="hidden sm:inline">{creds.email ? "Gmail connected" : "No Gmail — set in Settings"}</span>
         </div>
       </div>
 
@@ -121,11 +133,11 @@ export default function AgentPage() {
         {messages.map((m, i) => <MessageBubble key={i} msg={m} />)}
         {loading && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center shrink-0">
-              <Bot size={14} className="text-white" />
+            <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center shrink-0" style={{ border: "1px solid var(--border)" }}>
+              <Bot size={13} style={{ color: "var(--text-2)" }} />
             </div>
-            <div className="px-4 py-3 rounded-2xl rounded-tl-sm" style={{ background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-sm)" }}>
-              <Loader2 size={16} className="animate-spin" style={{ color: "var(--text-3)" }} />
+            <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-white" style={{ border: "1px solid var(--border)", boxShadow: "var(--shadow-sm)" }}>
+              <Loader2 size={15} className="animate-spin" style={{ color: "var(--text-3)" }} />
             </div>
           </div>
         )}
@@ -133,8 +145,11 @@ export default function AgentPage() {
       </div>
 
       {/* Input */}
-      <div className="pt-4 pb-2">
-        <div className="flex items-center gap-3 p-2 pl-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border-strong)", boxShadow: "var(--shadow-md)" }}>
+      <div className="pt-4 pb-1">
+        <div
+          className="flex items-center gap-3 p-2 pl-4 rounded-xl bg-white"
+          style={{ border: "1px solid var(--border-strong)", boxShadow: "var(--shadow-md)" }}
+        >
           <input
             ref={inputRef}
             className="flex-1 text-sm bg-transparent outline-none"
@@ -145,7 +160,7 @@ export default function AgentPage() {
             onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
           />
           <button onClick={() => send()} disabled={loading || !input.trim()} className="btn-primary py-2 px-3 shrink-0">
-            <Send size={15} />
+            <Send size={14} />
           </button>
         </div>
       </div>

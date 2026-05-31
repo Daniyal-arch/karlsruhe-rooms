@@ -1,17 +1,17 @@
 "use client"
 import { Room } from "@/lib/api"
-import { MapPin, Maximize2, Calendar, Mail, Phone, ExternalLink, CheckCircle2, Clock } from "lucide-react"
+import { MapPin, Maximize2, Calendar, Mail, Phone, ExternalLink, CheckCircle2 } from "lucide-react"
 
-const SETUP: Record<string, { bg: string; text: string; label: string; dot: string }> = {
+const SETUP: Record<string, { bg: string; text: string; dot: string; label: string }> = {
   "möbliert":     { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", label: "Furnished" },
-  "teilmöbliert": { bg: "bg-amber-50",   text: "text-amber-700",  dot: "bg-amber-400",   label: "Part-furnished" },
-  "unmöbliert":   { bg: "bg-gray-100",   text: "text-gray-600",   dot: "bg-gray-400",    label: "Unfurnished" },
+  "teilmöbliert": { bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-400",   label: "Part-furnished" },
+  "unmöbliert":   { bg: "bg-gray-100",   text: "text-gray-500",    dot: "bg-gray-400",    label: "Unfurnished" },
 }
 
 function getSetup(s?: string | null) {
   if (!s) return null
   const key = Object.keys(SETUP).find(k => s.toLowerCase().includes(k))
-  return key ? SETUP[key] : { bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400", label: s }
+  return key ? SETUP[key] : { bg: "bg-gray-100", text: "text-gray-500", dot: "bg-gray-400", label: s }
 }
 
 interface Props {
@@ -28,15 +28,21 @@ export default function RoomCard({ room, selected, onSelect, onEmail }: Props) {
   return (
     <div
       onClick={() => onSelect?.(room.id)}
-      className={`card-hover group relative flex flex-col overflow-hidden transition-all ${
-        onSelect ? "cursor-pointer" : ""
-      } ${selected ? "!border-blue-500 !shadow-[0_0_0_3px_var(--accent-dim)]" : ""}`}
+      className={`card-hover group relative flex flex-col overflow-hidden ${onSelect ? "cursor-pointer" : ""}`}
+      style={selected ? { borderColor: "var(--accent)", boxShadow: "0 0 0 3px var(--accent-dim), var(--shadow-sm)" } : {}}
     >
-      {/* Top accent stripe */}
-      <div className={`h-[3px] w-full ${hasEmail ? "bg-gradient-to-r from-blue-500 to-violet-500" : "bg-gradient-to-r from-gray-200 to-gray-300"}`} />
+      {/* Top stripe */}
+      <div
+        className="h-[3px] w-full"
+        style={{
+          background: hasEmail
+            ? "linear-gradient(90deg,#4f46e5,#7c3aed)"
+            : "linear-gradient(90deg,#e5e7eb,#d1d5db)",
+        }}
+      />
 
       <div className="p-4 flex flex-col gap-3">
-        {/* Row 1: Price + badge + select */}
+        {/* Price row */}
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="flex items-baseline gap-1">
@@ -51,7 +57,7 @@ export default function RoomCard({ room, selected, onSelect, onEmail }: Props) {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
             {setup && (
               <span className={`badge ${setup.bg} ${setup.text}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${setup.dot}`} />
@@ -59,16 +65,22 @@ export default function RoomCard({ room, selected, onSelect, onEmail }: Props) {
               </span>
             )}
             {onSelect && (
-              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                selected ? "bg-blue-600 border-blue-600" : "bg-white border-gray-300 opacity-0 group-hover:opacity-100"
-              }`}>
-                {selected && <CheckCircle2 size={12} className="text-white" />}
+              <div
+                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                  selected ? "opacity-100" : "opacity-0 group-hover:opacity-60"
+                }`}
+                style={{
+                  background: selected ? "var(--accent)" : "white",
+                  borderColor: selected ? "var(--accent)" : "var(--border-strong)",
+                }}
+              >
+                {selected && <CheckCircle2 size={12} color="white" />}
               </div>
             )}
           </div>
         </div>
 
-        {/* Row 2: Details */}
+        {/* Details */}
         <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs" style={{ color: "var(--text-2)" }}>
           {room.size_m2 && (
             <span className="flex items-center gap-1">
@@ -90,7 +102,7 @@ export default function RoomCard({ room, selected, onSelect, onEmail }: Props) {
           )}
         </div>
 
-        {/* Row 3: Transport tags */}
+        {/* Transport */}
         {(room.bus_min || room.tram_min) && (
           <div className="flex gap-2">
             {room.bus_min && (
@@ -106,12 +118,12 @@ export default function RoomCard({ room, selected, onSelect, onEmail }: Props) {
           </div>
         )}
 
-        {/* Row 4: Contact + actions */}
+        {/* Contact + actions */}
         <div className="flex items-center gap-2 pt-2.5" style={{ borderTop: "1px solid var(--border)" }}>
           <div className="flex-1 min-w-0">
             {room.email ? (
               <span className="flex items-center gap-1.5 text-[11px] truncate" style={{ color: "var(--text-3)" }}>
-                <Mail size={11} className="text-blue-500 shrink-0" />
+                <Mail size={11} className="text-indigo-500 shrink-0" />
                 <span className="truncate">{room.email.split(";")[0]}</span>
               </span>
             ) : (room.phone || room.mobile) ? (
