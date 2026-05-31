@@ -61,7 +61,7 @@ export const roomsApi = {
 
   get: (id: string) => api.get<Room>(`/rooms/${id}`).then(r => r.data),
 
-  pins: (params?: Record<string, string | number>) =>
+  pins: (params?: Record<string, string | number | boolean>) =>
     api.get<MapPin[]>("/rooms/map/pins", { params }).then(r => r.data),
 }
 
