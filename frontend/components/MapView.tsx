@@ -44,7 +44,10 @@ function centerIcon() {
 
 function FlyTo({ lat, lng, zoom }: { lat: number; lng: number; zoom?: number }) {
   const map = useMap()
-  useEffect(() => { map.flyTo([lat, lng], zoom ?? map.getZoom(), { duration: 1 }) }, [lat, lng])
+  useEffect(() => {
+    if (isNaN(lat) || isNaN(lng)) return
+    map.flyTo([lat, lng], zoom ?? map.getZoom(), { duration: 1 })
+  }, [lat, lng])
   return null
 }
 
@@ -112,7 +115,7 @@ export default function MapView({ pins, center, radiusKm, mode, onPinClick, onCe
         )}
 
         {/* Room pins */}
-        {pins.map(pin => {
+        {pins.filter(pin => !isNaN(pin.lat) && !isNaN(pin.lng)).map(pin => {
           const dist = haversineKm(center[0], center[1], pin.lat, pin.lng)
           const inRadius = !radiusKm || dist <= radiusKm
           return (
