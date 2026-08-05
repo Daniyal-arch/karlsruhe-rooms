@@ -34,9 +34,11 @@ jobs:
 
   # Google Sheets feed — only whole apartments that fit GROUP_SIZE people.
   # Independent of the DB scrape above so a failure in one can't block the other.
+  # Every listing's detail page is opened (~140 per run), so allow more time
+  # than the DB job needs.
   sheets:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4

@@ -18,11 +18,16 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 # ── Config ────────────────────────────────────────────────────────────────────
 EMAIL    = os.environ.get("SWKA_EMAIL", "daniyalnahk@gmail.com")
 PASSWORD = os.environ.get("SWKA_PASSWORD", "Daniyalkhan789@")
-# Cold rent ceiling for the WHOLE apartment (a 3-person flat costs ~3x a room).
-MAX_RENT = int(os.environ.get("MAX_RENT", "1800"))
-# How many people need to fit. One room may be shared by two, so an apartment
-# with R rooms sleeps R + 1 → we need R >= GROUP_SIZE - 1.
+# Cold rent ceiling on the figure the listing advertises. Deliberately generous:
+# it is a safety net against parse errors, not the real filter. Judge by the
+# "Rent/Person (EUR)" column in the sheet instead.
+MAX_RENT = int(os.environ.get("MAX_RENT", "2500"))
+# How many people need to fit. One room may be shared by two, so a place with
+# R lettable rooms sleeps R + 1 → we need R >= GROUP_SIZE - 1.
 GROUP_SIZE = int(os.environ.get("GROUP_SIZE", "3"))
+# Keep "check" rows (plausible but not certain) in the sheet. Set to "false"
+# for confirmed matches only.
+INCLUDE_MAYBE = os.environ.get("INCLUDE_MAYBE", "true").lower() == "true"
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 SHEET_ID     = os.environ.get("SHEET_ID", "")       # Google Sheet ID from URL
@@ -32,7 +37,8 @@ LOGIN_URL    = "https://www.sw-ka.de/en/mein_account/"
 LISTINGS_URL = "https://www.sw-ka.de/en/wohnen/zimmervermittlung/privatzimmer_suchen/"
 
 COLUMNS = [
-    "Scraped At", "Rent (EUR)", "Extra Costs (EUR)", "Total (EUR)",
+    "Scraped At", "Fit", "Why", "Flags",
+    "Rent (EUR)", "Extra Costs (EUR)", "Total (EUR)",
     "Rent/Person (EUR)", "Rooms", "Sleeps",
     "Room Type", "Size (m2)", "Available From",
     "Name", "Email", "Phone", "Mobile",
@@ -45,32 +51,75 @@ COLUMNS = [
 ]
 
 # ── Room-type filter ──────────────────────────────────────────────────────────
-# sw-ka publishes exactly three shapes of offer in the "Zimmertyp" field:
-#   "3-Zimmer-Wohnung"          → a whole apartment with 3 separate rooms
-#   "1 Einzelzimmer in 4er WG"  → one room inside an existing 4-person flat
-#   "Einzelzimmer"              → one standalone room/unit for a single tenant
-# Only whole apartments can house a group, so the last two are always rejected.
+# Every "Zimmertyp" sw-ka publishes, taken from a full crawl of the board:
+#   "3-Zimmer-Wohnung"   "2,5-Zimmer-Wohnung"  → whole apartment, N rooms
+#   "4 Einzelzimmer in 4er WG"                 → 4 rooms of a 4-person flat,
+#                                                i.e. the whole flat is free
+#   "1 Einzelzimmer in 4er WG"                 → one room in an existing flat
+#   "Einzelzimmer" / "Doppelzimmer"            → one standalone room
+# The leading count in "N Einzelzimmer in Mer WG" is how many rooms are on
+# offer — N >= 2 means a group can move in together, which the earlier
+# version missed entirely.
 
-APARTMENT_RE = re.compile(r"(\d+)\s*-?\s*Zimmer\s*-?\s*Wohnung", re.I)
-WG_ROOM_RE   = re.compile(r"Einzelzimmer\s+in\s+(\d+)\s*er\s*WG", re.I)
-SINGLE_RE    = re.compile(r"Einzelzimmer|Appartement|Apartment", re.I)
+APARTMENT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*-?\s*Zimmer\s*-?\s*Wohnung", re.I)
+WG_ROOMS_RE  = re.compile(r"(\d+)\s*(?:Einzel|Doppel)?zimmer\s+in\s+(\d+)\s*er\s*WG", re.I)
+WG_ANY_RE    = re.compile(r"in\s+(\d+)\s*er\s*WG", re.I)
 DOUBLE_RE    = re.compile(r"Doppelzimmer", re.I)
+SINGLE_RE    = re.compile(r"Einzelzimmer|Appartement|Apartment|Zimmer", re.I)
+
+# Free-text rescues: the type says "one room" but the landlord is really
+# offering the whole place, or explicitly welcomes a flatshare. These run on
+# the landlord's own "Bemerkung" text only — the "Sonstiges" row renders every
+# option label ("Nur Mann | Nur Frau | Paar | ...") whether selected or not,
+# so it cannot be read as free text.
+#
+# "ganze Wohnung" must be about availability: "Internet in der ganzen Wohnung"
+# is not an offer, so require a frei/vermieten word close behind it.
+WHOLE_FLAT_RE = re.compile(
+    r"(?:ganze[sn]?|gesamte[sn]?|komplette[rn]?)\s+(?:\S+\s+){0,2}?(?:WG|Wohnung|Haus)"
+    r"[^.!?]{0,40}?(?:frei|vermiet|verf(?:ü|ue)gbar|zu\s+haben|beziehbar)"
+    r"|WG[-\s]?Aufl(?:ö|oe)sung"
+    r"|whole\s+(?:flat|apartment)|entire\s+(?:flat|apartment)", re.I)
+# "2 Zim. frei", "3 Zimmer frei", "2 Einzelzimmer (je 11qm)" — several rooms
+# of one place going at once.
+MULTI_ROOM_RE = re.compile(
+    r"\b([2-9])\s*(?:Einzel)?[Zz]im(?:mer)?\b\.?\s*(?:\([^)]*\)\s*)?"
+    r"(?:frei|zu\s+vermieten|verf(?:ü|ue)gbar|in\b)", re.I)
+WG_FRIENDLY_RE = re.compile(
+    r"WG[-\s]?geeignet|WG[-\s]?tauglich|f(?:ü|ue)r\s+(?:eine\s+)?WG\b|"
+    r"WG[-\s]?Neugr(?:ü|ue)ndung|WG[-\s]?f(?:ä|ae)hig|"
+    r"ideal\s+f(?:ü|ue)r\s+\d*\s*er?[-\s]?WG", re.I)
+# Hard "one tenant only" statements — never silently drop these, just flag them.
+SINGLE_ONLY_RE = re.compile(
+    r"nur\s+(?:f(?:ü|ue)r\s+)?(?:eine\s+)?Einzelperson|nur\s+f(?:ü|ue)r\s+1\s*(?:Person|Student)|"
+    r"keine\s+WG|nicht\s+f(?:ü|ue)r\s+(?:eine\s+)?WG|Einzelmieter", re.I)
 
 
 def classify(type_text: str) -> dict:
     """Map a Zimmertyp string to {kind, rooms, sleeps}.
 
-    `sleeps` assumes one room of an apartment can be shared by two people —
-    that is what makes a 2-room apartment viable for a group of three.
+    `rooms` is how many lettable rooms this one offer covers. `sleeps` assumes
+    a group may share one room two-up — that is what makes a 2-room place
+    viable for three people.
     """
     t = (type_text or "").strip()
 
     m = APARTMENT_RE.search(t)
     if m:
-        rooms = int(m.group(1))
+        # "2,5-Zimmer-Wohnung" — the half room is a box room, not a bedroom.
+        rooms = int(float(m.group(1).replace(",", ".")))
         return {"kind": "apartment", "rooms": rooms, "sleeps": rooms + 1}
 
-    if WG_ROOM_RE.search(t):
+    m = WG_ROOMS_RE.search(t)
+    if m:
+        offered, wg_size = int(m.group(1)), int(m.group(2))
+        if offered >= 2:
+            # Several rooms of the same flat are free at once.
+            kind = "whole_wg" if offered >= wg_size else "wg_multi"
+            return {"kind": kind, "rooms": offered, "sleeps": offered + 1}
+        return {"kind": "wg_room", "rooms": 1, "sleeps": 1}
+
+    if WG_ANY_RE.search(t):
         return {"kind": "wg_room", "rooms": 1, "sleeps": 1}
     if DOUBLE_RE.search(t):
         return {"kind": "double_room", "rooms": 1, "sleeps": 2}
@@ -80,9 +129,48 @@ def classify(type_text: str) -> dict:
     return {"kind": "unknown", "rooms": None, "sleeps": None}
 
 
-def fits_group(info: dict) -> bool:
-    """True when the listing is a whole apartment big enough for GROUP_SIZE."""
-    return info["kind"] == "apartment" and (info["sleeps"] or 0) >= GROUP_SIZE
+def assess(info: dict, remark: str = "") -> dict:
+    """Decide whether a listing can house GROUP_SIZE people.
+
+    Returns {fit, why, flags}. `fit` is "match" (confident), "check" (worth a
+    look — the type alone says no but the free text hints otherwise, or the
+    size fits but the landlord added a caveat) or "no".
+    """
+    text = remark or ""
+    flags = []
+    if SINGLE_ONLY_RE.search(text):
+        flags.append("landlord says single tenant only")
+
+    sleeps = info.get("sleeps") or 0
+    rooms  = info.get("rooms")
+    big_enough = sleeps >= GROUP_SIZE
+
+    if big_enough:
+        why = (f"{rooms} rooms → sleeps {sleeps}"
+               if info["kind"] == "apartment"
+               else f"{rooms} rooms of a shared flat on offer → sleeps {sleeps}")
+        # Don't discard on a caveat — surface it and let a human judge.
+        if SINGLE_ONLY_RE.search(text):
+            return {"fit": "check", "why": f"{why}, but landlord wants one tenant",
+                    "flags": flags}
+        return {"fit": "match", "why": why, "flags": flags}
+
+    # Too small on paper — look for a whole-flat or WG-friendly hint.
+    if WHOLE_FLAT_RE.search(text):
+        return {"fit": "check", "why": "remark suggests the whole place is free",
+                "flags": flags}
+    m = MULTI_ROOM_RE.search(text)
+    if m and int(m.group(1)) >= GROUP_SIZE - 1:
+        return {"fit": "check", "why": f"remark mentions {m.group(1)} rooms going at once",
+                "flags": flags}
+    if WG_FRIENDLY_RE.search(text):
+        return {"fit": "check", "why": "landlord welcomes a flatshare",
+                "flags": flags}
+    if info["kind"] == "unknown":
+        return {"fit": "check", "why": "room type not recognised — verify manually",
+                "flags": flags}
+
+    return {"fit": "no", "why": f"{info['kind']} sleeps {sleeps}", "flags": flags}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def log(msg):
@@ -137,11 +225,19 @@ def login(page):
 
 # ── Collect listing URLs ──────────────────────────────────────────────────────
 def collect_listings(page):
+    """Walk every result page and return one entry per listing.
+
+    Nothing is filtered on room type here: the free-text remark that rescues a
+    mislabelled whole-flat offer only exists on the detail page, so the
+    decision is made later in main(). Only the rent ceiling applies.
+    """
     seen, results = set(), []
-    skipped = {}
+    over_budget = 0
     page_num = 1
     while True:
-        url = LISTINGS_URL if page_num == 1 else f"{LISTINGS_URL}?tx_swkawohn_pi1[page]={page_num}"
+        # Pagination is ?cpage=N. The old tx_swkawohn_pi1[page] parameter was
+        # ignored by the site, so every run only ever saw the first 40 offers.
+        url = LISTINGS_URL if page_num == 1 else f"{LISTINGS_URL}?cpage={page_num}"
         log(f"Scanning page {page_num}...")
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
@@ -149,12 +245,10 @@ def collect_listings(page):
         rows = page.query_selector_all(
             "table tbody tr, .listing-item, article, li.room, .tx-swkawohn-pi1 li, .angebot"
         )
-        # `discovered` counts newly-seen listings and drives pagination;
-        # `matched` counts the ones that survive the filter.
-        discovered = matched = 0
+        discovered = 0
         for row in rows:
             text = row.inner_text()
-            m = re.search(r"(\d{2,4})\s*[Ee]uro|(\d{2,4})\s*€", text)
+            m = re.search(r"(\d{2,5})\s*[Ee]uro|(\d{2,5})\s*€", text)
             if not m: continue
             rent = int(m.group(1) or m.group(2))
             link = row.query_selector("a[href]")
@@ -168,32 +262,22 @@ def collect_listings(page):
             discovered += 1
 
             if rent > MAX_RENT:
-                skipped["over budget"] = skipped.get("over budget", 0) + 1
+                over_budget += 1
                 continue
 
-            # The first cell of the result row is the Zimmertyp — filter here so
-            # rejected listings never cost us a detail-page fetch.
+            # First cell of the result row is the Zimmertyp.
             type_text = text.split("\t")[0].strip()
-            info = classify(type_text)
-            if not fits_group(info):
-                reason = (f"apartment with only {info['rooms']} room(s)"
-                          if info["kind"] == "apartment" else info["kind"])
-                skipped[reason] = skipped.get(reason, 0) + 1
-                continue
+            results.append({"rent": rent, "url": full, "type_text": type_text,
+                            "info": classify(type_text)})
 
-            results.append({"rent": rent, "url": full, "type_text": type_text, "info": info})
-            matched += 1
-
-        log(f"  Page {page_num}: {discovered} listings seen, {matched} match "
-            f"(<= EUR{MAX_RENT}, sleeps >= {GROUP_SIZE})")
+        log(f"  Page {page_num}: {discovered} listings found")
         if discovered == 0:
             break
         page_num += 1
         time.sleep(1)
 
-    if skipped:
-        detail = ", ".join(f"{v} {k}" for k, v in sorted(skipped.items()))
-        log(f"Filtered out (too small for {GROUP_SIZE} people): {detail}")
+    if over_budget:
+        log(f"Skipped {over_budget} listings above the EUR{MAX_RENT} ceiling.")
     return results
 
 # ── Parse detail page ─────────────────────────────────────────────────────────
@@ -201,7 +285,10 @@ SCAM_WARNING = "wohnen@sw-ka.de"  # appears in the fraud-warning text on every p
 
 def parse_detail(page, url, rent_from_list, type_text="", info=None):
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    page.wait_for_timeout(3000)
+    # The board is server-rendered, so a short settle is enough. This runs
+    # ~136 times per crawl now that every listing is checked, and 3s each
+    # blew past the job timeout.
+    page.wait_for_timeout(700)
 
     # Save HTML of first listing for debugging (remove after confirming fields)
     if not os.path.exists("listing_real.html"):
@@ -268,6 +355,12 @@ def parse_detail(page, url, rent_from_list, type_text="", info=None):
     rooms  = info.get("rooms")
     sleeps = info.get("sleeps")
 
+    # Free text. "Bemerkung" is where landlords write "ganze WG frei" or
+    # "nur Einzelperson", so it decides the borderline cases.
+    remark = kv_get("bemerkung", "note", "hinweis", "anmerkung")
+    misc   = kv_get("miscellaneous", "sonstiges", "restrictions")
+    verdict = assess(info, remark)
+
     # Available from — look for date pattern first
     date_m = re.search(r"(\d{1,2}[./]\d{1,2}[./]\d{2,4}|sofort|immediately|ab sofort)", body, re.I)
     available = date_m.group(1) if date_m else kv_get("available", "verfügbar", "bezugsfrei")
@@ -296,6 +389,9 @@ def parse_detail(page, url, rent_from_list, type_text="", info=None):
 
     return {
         "Scraped At":        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "Fit":               verdict["fit"],
+        "Why":               verdict["why"],
+        "Flags":             "; ".join(verdict["flags"]),
         "Rent (EUR)":        rent_num,
         "Extra Costs (EUR)": extra_num if extra_num else "",
         "Total (EUR)":       rent_num + extra_num,
@@ -323,8 +419,8 @@ def parse_detail(page, url, rent_from_list, type_text="", info=None):
         "Bus (min)":         bus_m.group(1) if bus_m else "",
         "Tram (min)":        tram_m.group(1) if tram_m else "",
         "Train (min)":       train_m.group(1) if train_m else "",
-        "Restrictions":      kv_get("miscellaneous", "sonstiges", "restrictions", "nur"),
-        "Notes":             kv_get("note", "hinweis", "anmerkung"),
+        "Restrictions":      misc,
+        "Notes":             remark,
         "Listing URL":       url,
     }
 
@@ -374,8 +470,8 @@ def save_csv(rows, path="rooms_full.csv"):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    log(f"Starting scraper — apartments for {GROUP_SIZE} people "
-        f"({GROUP_SIZE - 1}+ rooms), max rent EUR{MAX_RENT}, headless={HEADLESS}")
+    log(f"Starting scraper — places for {GROUP_SIZE} people ({GROUP_SIZE - 1}+ rooms), "
+        f"max rent EUR{MAX_RENT}, include-maybes={INCLUDE_MAYBE}, headless={HEADLESS}")
     with sync_playwright() as pw:
         chrome_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -399,23 +495,40 @@ def main():
         listings = collect_listings(page)
         log(f"Total listings to process: {len(listings)}")
 
-        results = []
+        results, rejected, errors = [], 0, 0
         for i, item in enumerate(listings, 1):
-            log(f"[{i}/{len(listings)}] {item['url']}")
             try:
                 detail = parse_detail(page, item["url"], item["rent"],
                                       item.get("type_text", ""), item.get("info"))
-                results.append(detail)
-                log(f"  {detail['Room Type']} | EUR{detail['Rent (EUR)']} "
-                    f"(EUR{detail['Rent/Person (EUR)']}/person) | "
-                    f"{detail['Email'] or detail['Phone'] or '(no contact)'}")
             except Exception as e:
-                log(f"  Error: {e}")
-            time.sleep(1)
+                errors += 1
+                log(f"[{i}/{len(listings)}] ERROR {item['url']}: {e}")
+                time.sleep(1)
+                continue
+
+            fit = detail["Fit"]
+            if fit == "match" or (fit == "check" and INCLUDE_MAYBE):
+                results.append(detail)
+                flags = f" [{detail['Flags']}]" if detail["Flags"] else ""
+                log(f"[{i}/{len(listings)}] {fit.upper()}: {detail['Room Type']} | "
+                    f"EUR{detail['Rent (EUR)']} (EUR{detail['Rent/Person (EUR)']}/person) | "
+                    f"{detail['Why']}{flags} | "
+                    f"{detail['Email'] or detail['Phone'] or '(no contact)'}")
+            else:
+                rejected += 1
+            time.sleep(0.25)
 
         browser.close()
 
-    log(f"\nDone — {len(results)} listings scraped.")
+    # Confident matches first, then the ones worth a manual look; cheapest
+    # per person at the top of each group.
+    order = {"match": 0, "check": 1}
+    results.sort(key=lambda r: (order.get(r["Fit"], 2), r["Rent/Person (EUR)"] or 9999))
+
+    matches = sum(1 for r in results if r["Fit"] == "match")
+    checks  = len(results) - matches
+    log(f"\nDone — {len(listings)} listings scanned: {matches} match, "
+        f"{checks} worth checking, {rejected} rejected, {errors} errors.")
     save_csv(results)
     sync_to_sheets(results)
 
