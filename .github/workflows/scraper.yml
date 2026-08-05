@@ -31,3 +31,40 @@ jobs:
           DATABASE_URL:  ${{ secrets.DATABASE_URL }}
           HEADLESS:      "true"
         run: python scrapers/swka.py
+
+  # Google Sheets feed — only whole apartments that fit GROUP_SIZE people.
+  # Independent of the DB scrape above so a failure in one can't block the other.
+  sheets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run scraper and sync to Google Sheets
+        env:
+          SWKA_EMAIL:    ${{ secrets.SWKA_EMAIL }}
+          SWKA_PASSWORD: ${{ secrets.SWKA_PASSWORD }}
+          GOOGLE_CREDS:  ${{ secrets.GOOGLE_CREDS }}
+          SHEET_ID:      ${{ secrets.SHEET_ID }}
+          GROUP_SIZE:    "3"
+          MAX_RENT:      "1800"
+          HEADLESS:      "true"
+        run: python scraper_full.py
+
+      - name: Upload CSV as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rooms-${{ github.run_number }}
+          path: rooms_full.csv
+          retention-days: 7
