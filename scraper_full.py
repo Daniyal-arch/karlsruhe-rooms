@@ -28,6 +28,10 @@ GROUP_SIZE = int(os.environ.get("GROUP_SIZE", "3"))
 # Keep "check" rows (plausible but not certain) in the sheet. Set to "false"
 # for confirmed matches only.
 INCLUDE_MAYBE = os.environ.get("INCLUDE_MAYBE", "true").lower() == "true"
+# No move-in-date filter on purpose: an offer being on the board is itself the
+# availability signal, and over half of them say "ab sofort". Filtering to a
+# month would hide places whose landlord would happily agree a later start.
+# The real date is reported instead so it can be judged per listing.
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 SHEET_ID     = os.environ.get("SHEET_ID", "")       # Google Sheet ID from URL
@@ -37,17 +41,16 @@ LOGIN_URL    = "https://www.sw-ka.de/en/mein_account/"
 LISTINGS_URL = "https://www.sw-ka.de/en/wohnen/zimmervermittlung/privatzimmer_suchen/"
 
 COLUMNS = [
-    "Scraped At", "Fit", "Why", "Flags",
-    "Rent (EUR)", "Extra Costs (EUR)", "Total (EUR)",
-    "Rent/Person (EUR)", "Rooms", "Sleeps",
-    "Room Type", "Size (m2)", "Available From",
-    "Name", "Email", "Phone", "Mobile",
-    "Street", "ZIP", "City", "District",
+    "Listing URL", "Fit", "Available From", "Posted",
+    "Room Type", "Rooms", "Sleeps",
+    "Rent/Person (EUR)", "Total (EUR)", "Rent (EUR)", "Extra Costs (EUR)",
+    "Size (m2)", "City", "District", "Street", "ZIP",
+    "Email", "Phone", "Mobile", "Name",
+    "Why", "Flags", "Notes", "Restrictions",
     "Deposit (EUR)", "Electricity", "Heating", "Heating Type",
     "Facilities", "Setup", "Renovation",
     "Bus (min)", "Tram (min)", "Train (min)",
-    "Restrictions", "Notes",
-    "Listing URL",
+    "Scraped At",
 ]
 
 # ── Room-type filter ──────────────────────────────────────────────────────────
@@ -265,10 +268,16 @@ def collect_listings(page):
                 over_budget += 1
                 continue
 
-            # First cell of the result row is the Zimmertyp.
-            type_text = text.split("\t")[0].strip()
+            # Result row cells: type | rent | size | free from | posted | link.
+            # Both dates come from here — the detail page leads with
+            # "Angebot vom" (when the ad went up), which is easy to mistake
+            # for the move-in date.
+            cells = [c.strip() for c in text.split("\t")]
+            type_text = cells[0] if cells else ""
             results.append({"rent": rent, "url": full, "type_text": type_text,
-                            "info": classify(type_text)})
+                            "info": classify(type_text),
+                            "available": cells[3] if len(cells) > 3 else "",
+                            "posted":    cells[4] if len(cells) > 4 else ""})
 
         log(f"  Page {page_num}: {discovered} listings found")
         if discovered == 0:
@@ -283,7 +292,8 @@ def collect_listings(page):
 # ── Parse detail page ─────────────────────────────────────────────────────────
 SCAM_WARNING = "wohnen@sw-ka.de"  # appears in the fraud-warning text on every page
 
-def parse_detail(page, url, rent_from_list, type_text="", info=None):
+def parse_detail(page, url, rent_from_list, type_text="", info=None,
+                 available="", posted=""):
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     # The board is server-rendered, so a short settle is enough. This runs
     # ~136 times per crawl now that every listing is checked, and 3s each
@@ -361,9 +371,16 @@ def parse_detail(page, url, rent_from_list, type_text="", info=None):
     misc   = kv_get("miscellaneous", "sonstiges", "restrictions")
     verdict = assess(info, remark)
 
-    # Available from — look for date pattern first
-    date_m = re.search(r"(\d{1,2}[./]\d{1,2}[./]\d{2,4}|sofort|immediately|ab sofort)", body, re.I)
-    available = date_m.group(1) if date_m else kv_get("available", "verfügbar", "bezugsfrei")
+    # Move-in date. Prefer the results table, which has a dedicated column.
+    # Falling back to the first date in the body was the old bug: the page
+    # opens with "Angebot vom: <posted>", so every row showed the day the ad
+    # was placed instead of when the place is free.
+    if not available:
+        available = kv_get("zu vermieten", "available from", "bezugsfrei", "verfügbar ab")
+        available = re.sub(r"^ab\s+", "", available).strip()
+    if not posted:
+        m_posted = re.search(r"Angebot\s+vom\s*:?\s*(\d{1,2}\.\d{1,2}\.\d{2,4})", body, re.I)
+        posted = m_posted.group(1) if m_posted else ""
 
     # Name — many landlords opt out of publishing
     name_raw = kv_get("name", "anbieter")
@@ -401,6 +418,7 @@ def parse_detail(page, url, rent_from_list, type_text="", info=None):
         "Room Type":         room_type,
         "Size (m2)":         size,
         "Available From":    available,
+        "Posted":            posted,
         "Name":              name,
         "Email":             email,
         "Phone":             phones[0] if len(phones) > 0 else "",
@@ -499,7 +517,8 @@ def main():
         for i, item in enumerate(listings, 1):
             try:
                 detail = parse_detail(page, item["url"], item["rent"],
-                                      item.get("type_text", ""), item.get("info"))
+                                      item.get("type_text", ""), item.get("info"),
+                                      item.get("available", ""), item.get("posted", ""))
             except Exception as e:
                 errors += 1
                 log(f"[{i}/{len(listings)}] ERROR {item['url']}: {e}")
@@ -512,7 +531,7 @@ def main():
                 flags = f" [{detail['Flags']}]" if detail["Flags"] else ""
                 log(f"[{i}/{len(listings)}] {fit.upper()}: {detail['Room Type']} | "
                     f"EUR{detail['Rent (EUR)']} (EUR{detail['Rent/Person (EUR)']}/person) | "
-                    f"{detail['Why']}{flags} | "
+                    f"free {detail['Available From'] or '?'} | {detail['Why']}{flags} | "
                     f"{detail['Email'] or detail['Phone'] or '(no contact)'}")
             else:
                 rejected += 1
