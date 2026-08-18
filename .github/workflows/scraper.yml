@@ -32,13 +32,14 @@ jobs:
           HEADLESS:      "true"
         run: python scrapers/swka.py
 
-  # Google Sheets feed — only whole apartments that fit GROUP_SIZE people.
+  # Google Sheets feed — sw-ka.de + wg-gesucht.de, filtered to 2-4 room places
+  # under the rent/deposit ceiling (see common.py).
   # Independent of the DB scrape above so a failure in one can't block the other.
-  # Every listing's detail page is opened (~140 per run), so allow more time
-  # than the DB job needs.
+  # Every listing's detail page is opened on both sites (~140 + ~40 per run),
+  # so allow more time than the DB job needs.
   sheets:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4

@@ -2,16 +2,17 @@
 sw-ka.de Room Scraper (Playwright version)
 Logs in with a real browser, scrapes rooms <= MAX_RENT, saves emails to CSV.
 Setup: pip install playwright && python -m playwright install chromium
+Env vars: SWKA_EMAIL, SWKA_PASSWORD (required)
 Run:   python scraper.py
 """
 
-import sys, io, csv, time, re
+import os, sys, io, csv, time, re
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-EMAIL    = "daniyalnahk@gmail.com"
-PASSWORD = "Daniyalkhan789@"   # <-- change this after running!
+EMAIL    = os.environ["SWKA_EMAIL"]
+PASSWORD = os.environ["SWKA_PASSWORD"]
 MAX_RENT = 400
 OUTPUT   = "rooms_under_400.csv"
 
