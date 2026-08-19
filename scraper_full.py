@@ -466,6 +466,7 @@ def main():
 
     matches = sum(1 for r in results if r["Fit"] == "match")
     checks = len(results) - matches
+    best = sum(1 for r in results if r["Best Match"] == "Yes")
     log(f"\n{before} candidates passed the size/fit check across both sources; "
         f"{len(results)} also fit the room-count/price filter — {matches} match, "
         f"{checks} worth checking, {best} best match.")
