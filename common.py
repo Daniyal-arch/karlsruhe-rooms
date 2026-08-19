@@ -151,7 +151,7 @@ def assess(info: dict, remark: str = "", group_size: int = 3) -> dict:
 # A missing/unparseable deposit or rent doesn't hard-exclude — it's treated as
 # "unknown, worth a manual look" rather than silently dropped.
 ALLOWED_ROOMS = (2, 3, 4)
-MAX_RENT_FILTER = 1200
+MAX_RENT_FILTER = 1440
 MAX_DEPOSIT_FILTER = 2200
 
 
